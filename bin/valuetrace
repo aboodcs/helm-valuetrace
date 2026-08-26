@@ -1,0 +1,22 @@
+#!/usr/bin/env sh
+set -eu
+
+PLUGIN_DIR="${HELM_PLUGIN_DIR:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}"
+PYTHON_BIN="$PLUGIN_DIR/.venv/bin/python"
+
+if [ ! -x "$PYTHON_BIN" ]; then
+  PYTHON_BIN="$(command -v python3 || true)"
+fi
+
+if [ -z "$PYTHON_BIN" ]; then
+  echo "Helm ValueTrace requires Python 3." >&2
+  exit 1
+fi
+
+if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'; then
+  echo "Helm ValueTrace requires Python 3.10 or newer." >&2
+  exit 1
+fi
+
+export PYTHONPATH="$PLUGIN_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
+exec "$PYTHON_BIN" -m helm_valuetrace.cli "$@"

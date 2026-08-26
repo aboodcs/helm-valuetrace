@@ -1,0 +1,12 @@
+name: valuetrace
+version: 0.1.0
+usage: Trace, validate, and compare Helm values
+description: Shows where final Helm values came from and detects configuration drift.
+ignoreFlags: false
+platformCommand:
+  - command: ${HELM_PLUGIN_DIR}/bin/valuetrace
+platformHooks:
+  install:
+    - command: ${HELM_PLUGIN_DIR}/scripts/install.sh
+  update:
+    - command: ${HELM_PLUGIN_DIR}/scripts/install.sh
