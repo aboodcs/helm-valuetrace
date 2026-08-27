@@ -122,6 +122,22 @@ class CliTests(unittest.TestCase):
         self.assertIn("image.repostory", process.stderr)
         self.assertIn("image.repository", process.stderr)
 
+    def test_structured_output_keeps_warnings_on_standard_error(self) -> None:
+        process = self.run_cli(
+            str(self.chart),
+            "-f",
+            str(self.typo),
+            "--strict-unknown",
+            "--output",
+            "json",
+        )
+
+        self.assertEqual(process.returncode, 2)
+        document = json.loads(process.stdout)
+        self.assertEqual(document["unknown"][0]["key"], "image.repostory")
+        self.assertIn("WARNINGS", process.stderr)
+        self.assertIn("image.repository", process.stderr)
+
     def test_reference_comparison_reports_unknown_and_missing_keys(self) -> None:
         process = self.run_cli(
             str(self.reference_chart),
@@ -155,6 +171,20 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(process.returncode, 1)
         self.assertIn("Chart directory not found", process.stderr)
+        self.assertNotIn("Traceback", process.stderr)
+
+    def test_missing_required_chart_is_a_usage_error_with_status_one(self) -> None:
+        process = self.run_cli()
+
+        self.assertEqual(process.returncode, 1)
+        self.assertIn("arguments are required: CHART", process.stderr)
+        self.assertNotIn("Traceback", process.stderr)
+
+    def test_invalid_output_format_is_a_usage_error_with_status_one(self) -> None:
+        process = self.run_cli(str(self.chart), "--output", "xml")
+
+        self.assertEqual(process.returncode, 1)
+        self.assertIn("invalid choice", process.stderr)
         self.assertNotIn("Traceback", process.stderr)
 
 

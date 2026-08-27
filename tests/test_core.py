@@ -99,6 +99,105 @@ class TraceValuesTests(unittest.TestCase):
         self.assertEqual(parsed[1][1], 4)
         self.assertIs(parsed[2][1], True)
 
+    def test_set_scalar_types_match_helm_strvals(self) -> None:
+        parsed = parse_set_arguments(
+            [
+                "word=yes,leadingZero=0123,floatValue=1.0,empty=",
+                "enabled=TRUE,disabled=false,removed=null,zero=0",
+                "positive=42,negative=-7,overflow=9223372036854775808",
+            ]
+        )
+        values = {path[0]: value for path, value, _ in parsed}
+
+        self.assertEqual(values["word"], "yes")
+        self.assertEqual(values["leadingZero"], "0123")
+        self.assertEqual(values["floatValue"], "1.0")
+        self.assertEqual(values["empty"], "")
+        self.assertIs(values["enabled"], True)
+        self.assertIs(values["disabled"], False)
+        self.assertIsNone(values["removed"])
+        self.assertEqual(values["zero"], 0)
+        self.assertEqual(values["positive"], 42)
+        self.assertEqual(values["negative"], -7)
+        self.assertEqual(values["overflow"], "9223372036854775808")
+
+    def test_null_removes_existing_defaults_but_preserves_user_only_nulls(self) -> None:
+        result = trace_values(
+            default_values={
+                "nullable": "original",
+                "nested": {"removed": "original", "kept": "default"},
+            },
+            default_source="values.yaml",
+            default_lines={
+                ("nullable",): 1,
+                ("nested", "removed"): 3,
+                ("nested", "kept"): 4,
+            },
+            overrides=[
+                (
+                    {
+                        "nullable": None,
+                        "nested": {"removed": None, "userOnlyNull": None},
+                    },
+                    "override.yaml",
+                    {
+                        ("nullable",): 1,
+                        ("nested", "removed"): 3,
+                        ("nested", "userOnlyNull"): 4,
+                    },
+                )
+            ],
+        )
+
+        self.assertNotIn("nullable", result.values)
+        self.assertNotIn("removed", result.values["nested"])
+        self.assertEqual(result.values["nested"]["kept"], "default")
+        self.assertIsNone(result.values["nested"]["userOnlyNull"])
+        self.assertEqual(
+            [assignment.value for assignment in result.history[("nullable",)]],
+            ["original", None],
+        )
+
+    def test_defaults_are_recoalesced_after_user_value_type_changes(self) -> None:
+        result = trace_values(
+            default_values={"service": {"port": 80, "type": "ClusterIP"}},
+            default_source="values.yaml",
+            default_lines={("service", "port"): 2, ("service", "type"): 3},
+            overrides=[
+                (
+                    {"service": "disabled"},
+                    "first.yaml",
+                    {("service",): 1},
+                ),
+                (
+                    {"service": {"port": 8080}},
+                    "second.yaml",
+                    {("service", "port"): 2},
+                ),
+            ],
+        )
+
+        self.assertEqual(
+            result.values["service"],
+            {"port": 8080, "type": "ClusterIP"},
+        )
+
+    def test_chart_default_null_handling_tracks_helm_major_version(self) -> None:
+        common = {
+            "default_values": {"defaultNull": None, "present": "value"},
+            "default_source": "values.yaml",
+            "default_lines": {("defaultNull",): 1, ("present",): 2},
+            "overrides": [],
+        }
+
+        helm3 = trace_values(**common, helm_major_version=3)
+        helm4 = trace_values(**common, helm_major_version=4)
+
+        self.assertIn("defaultNull", helm3.values)
+        self.assertIsNone(helm3.values["defaultNull"])
+        self.assertNotIn("defaultNull", helm4.values)
+        self.assertEqual(helm4.values["present"], "value")
+
     def test_reference_values_are_not_merged_and_missing_keys_are_reported(self) -> None:
         result = trace_values(
             default_values={},

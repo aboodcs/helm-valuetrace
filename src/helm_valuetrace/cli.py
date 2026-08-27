@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -21,8 +24,13 @@ from .core import (
 )
 
 
+class ValueTraceArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise ValueTraceError(message)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = ValueTraceArgumentParser(
         prog="helm valuetrace",
         usage="helm valuetrace CHART [options]",
         add_help=False,
@@ -191,6 +199,46 @@ def _missing_rows(result: TraceResult) -> list[dict[str, str]]:
     ]
 
 
+def _detect_helm_major_version() -> int | None:
+    """Read the invoking Helm major version without contacting a cluster."""
+    helm_bin = os.environ.get("HELM_BIN")
+    if not helm_bin:
+        return None
+
+    try:
+        process = subprocess.run(
+            [helm_bin, "version", "--template", "{{.Version}}"],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+    if process.returncode != 0:
+        return None
+    match = re.search(r"v?(\d+)(?:\.|$)", process.stdout.strip())
+    return int(match.group(1)) if match else None
+
+
+def _print_warnings(result: TraceResult) -> None:
+    if not (result.unknown or result.missing):
+        return
+
+    print("\nWARNINGS", file=sys.stderr)
+    for item in result.unknown:
+        message = f"- Unknown key '{item.key}' from {item.source}"
+        if item.suggestion:
+            message += f"; did you mean '{item.suggestion}'?"
+        print(message, file=sys.stderr)
+    for item in result.missing:
+        print(
+            f"- Missing key '{item.key}' compared with {item.reference}",
+            file=sys.stderr,
+        )
+
+
 def _print_table(rows: list[dict[str, Any]], result: TraceResult) -> None:
     headers = ("KEY", "FINAL VALUE", "SOURCE", "ASSIGNMENTS")
     rendered = [
@@ -207,35 +255,36 @@ def _print_table(rows: list[dict[str, Any]], result: TraceResult) -> None:
         for index, cell in enumerate(row):
             widths[index] = min(max(widths[index], len(cell)), (46, 36, 44, 11)[index])
 
-    def clipped(cell: str, width: int) -> str:
+    def clipped(cell: str, width: int, keep_end: bool = False) -> str:
         if len(cell) <= width:
             return cell
+        if keep_end:
+            return "…" + cell[-max(0, width - 1) :]
         return cell[: max(0, width - 1)] + "…"
 
     print("HELM VALUETRACE")
     print("  ".join(header.ljust(widths[index]) for index, header in enumerate(headers)))
     print("  ".join("-" * width for width in widths))
     for row in rendered:
-        print("  ".join(clipped(cell, widths[index]).ljust(widths[index]) for index, cell in enumerate(row)))
+        print(
+            "  ".join(
+                clipped(cell, widths[index], keep_end=index == 2).ljust(widths[index])
+                for index, cell in enumerate(row)
+            )
+        )
 
     overridden = sum(1 for row in rows if len(row["assignments"]) > 1)
+    total = len(flatten_values(result.values))
+    displayed = (
+        f"{len(rows)} displayed of {total} final values"
+        if len(rows) != total
+        else f"{total} final values"
+    )
     print(
-        f"\n{len(rows)} final values, {overridden} overridden values, "
+        f"\n{displayed}, {overridden} overridden values, "
         f"{len(result.unknown)} unknown keys, {len(result.missing)} missing reference keys"
     )
-
-    if result.unknown or result.missing:
-        print("\nWARNINGS", file=sys.stderr)
-        for item in result.unknown:
-            message = f"- Unknown key '{item.key}' from {item.source}"
-            if item.suggestion:
-                message += f"; did you mean '{item.suggestion}'?"
-            print(message, file=sys.stderr)
-        for item in result.missing:
-            print(
-                f"- Missing key '{item.key}' compared with {item.reference}",
-                file=sys.stderr,
-            )
+    _print_warnings(result)
 
 
 def _print_structured(output: str, rows: list[dict[str, Any]], result: TraceResult) -> None:
@@ -248,6 +297,7 @@ def _print_structured(output: str, rows: list[dict[str, Any]], result: TraceResu
         print(json.dumps(document, indent=2, ensure_ascii=False, default=str))
     else:
         print(yaml.safe_dump(document, sort_keys=False, allow_unicode=True).rstrip())
+    _print_warnings(result)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -288,6 +338,7 @@ def run(args: argparse.Namespace) -> int:
         set_arguments=args.set_values,
         reference_values=reference_values,
         reference_source=reference_source,
+        helm_major_version=_detect_helm_major_version(),
     )
     rows = _result_rows(result, args.only_overridden)
 
@@ -305,8 +356,8 @@ def run(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
     try:
+        args = parser.parse_args(argv)
         return run(args)
     except ValueTraceError as exc:
         print(f"Error: {exc}", file=sys.stderr)

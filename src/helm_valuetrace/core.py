@@ -12,6 +12,8 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
 PathKey = tuple[str, ...]
 MISSING = object()
+INT64_MIN = -(2**63)
+INT64_MAX = 2**63 - 1
 
 
 class ValueTraceError(Exception):
@@ -172,6 +174,30 @@ def _set_nested(target: dict[str, Any], path: PathKey, value: Any) -> None:
     current[path[-1]] = value
 
 
+def _parse_helm_set_scalar(raw_value: str) -> Any:
+    """Parse a supported --set scalar with Helm's strvals typing rules."""
+    normalized = raw_value.lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    if normalized == "null":
+        return None
+    if raw_value == "0":
+        return 0
+
+    # Helm parses base-10 int64 values only when the raw value does not start
+    # with zero. Values such as 0123, 1.0, and yes therefore remain strings.
+    if raw_value and raw_value[0] != "0":
+        digits = raw_value[1:] if raw_value[0] in {"+", "-"} else raw_value
+        if digits and all("0" <= character <= "9" for character in digits):
+            parsed = int(raw_value, 10)
+            if INT64_MIN <= parsed <= INT64_MAX:
+                return parsed
+
+    return raw_value
+
+
 def _split_set_argument(raw: str) -> list[str]:
     parts: list[str] = []
     buffer: list[str] = []
@@ -223,12 +249,45 @@ def parse_set_arguments(raw_arguments: Iterable[str]) -> list[tuple[PathKey, Any
             path = tuple(part.strip() for part in raw_key.split(".") if part.strip())
             if not path:
                 raise ValueTraceError(f"Invalid --set key: {raw_key}")
-            try:
-                value = yaml.safe_load(raw_value)
-            except yaml.YAMLError as exc:
-                raise ValueTraceError(f"Invalid --set value for {raw_key}: {exc}") from exc
+            value = _parse_helm_set_scalar(raw_value)
             parsed.append((path, value, f"--set[{argument_number}]"))
     return parsed
+
+
+def _coalesce_values(
+    default_values: dict[str, Any],
+    user_values: dict[str, Any],
+    remove_default_nulls: bool,
+) -> dict[str, Any]:
+    """Coalesce chart defaults into higher-precedence user values like Helm."""
+    result = copy.deepcopy(user_values)
+
+    for key, default_value in default_values.items():
+        if key in result:
+            user_value = result[key]
+            if user_value is None:
+                # A user null removes a key that exists in chart defaults.
+                del result[key]
+            elif isinstance(user_value, dict) and isinstance(default_value, dict):
+                result[key] = _coalesce_values(
+                    default_value,
+                    user_value,
+                    remove_default_nulls,
+                )
+            continue
+
+        if default_value is None and remove_default_nulls:
+            continue
+        if isinstance(default_value, dict):
+            result[key] = _coalesce_values(
+                default_value,
+                {},
+                remove_default_nulls,
+            )
+        else:
+            result[key] = copy.deepcopy(default_value)
+
+    return result
 
 
 def _flexible_prefixes(default_values: dict[str, Any]) -> set[PathKey]:
@@ -269,8 +328,10 @@ def trace_values(
     set_arguments: Iterable[str] = (),
     reference_values: dict[str, Any] | None = None,
     reference_source: str | None = None,
+    helm_major_version: int | None = None,
 ) -> TraceResult:
-    merged: dict[str, Any] = {}
+    normalized_defaults: dict[str, Any] = {}
+    user_values: dict[str, Any] = {}
     history: dict[PathKey, list[Assignment]] = {}
     unknown_entries: list[tuple[PathKey, str]] = []
 
@@ -280,19 +341,34 @@ def trace_values(
         known.update(flatten_values(reference_values))
         flexible.update(_flexible_prefixes(reference_values))
 
-    _apply_mapping(merged, default_values, default_source, default_lines, history)
+    # Helm first merges all user-supplied files and --set values, then
+    # coalesces chart defaults into that result. Keep history in source order,
+    # but do not merge defaults into user values prematurely.
+    _apply_mapping(
+        normalized_defaults,
+        default_values,
+        default_source,
+        default_lines,
+        history,
+    )
 
     for override_values, source, line_numbers in overrides:
         for override_path in flatten_values(override_values):
             if not _is_known_path(override_path, known, flexible):
                 unknown_entries.append((override_path, source))
-        _apply_mapping(merged, override_values, source, line_numbers, history)
+        _apply_mapping(user_values, override_values, source, line_numbers, history)
 
     for set_path, set_value, source in parse_set_arguments(set_arguments):
         if not _is_known_path(set_path, known, flexible):
             unknown_entries.append((set_path, source))
-        _set_nested(merged, set_path, copy.deepcopy(set_value))
+        _set_nested(user_values, set_path, copy.deepcopy(set_value))
         history.setdefault(set_path, []).append(Assignment(source=source, line=None, value=copy.deepcopy(set_value)))
+
+    merged = _coalesce_values(
+        normalized_defaults,
+        user_values,
+        remove_default_nulls=(helm_major_version or 0) >= 4,
+    )
 
     known_text = sorted(path_text(path) for path in known)
     unknown: list[UnknownValue] = []

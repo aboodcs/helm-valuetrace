@@ -138,6 +138,10 @@ A single `--set` may contain comma-separated assignments:
 helm valuetrace ./chart --set image.tag=v2.0.0,replicaCount=5
 ```
 
+For supported scalar values, `--set` uses Helm's typing rules. `true`, `false`,
+`null`, and base-10 integers receive typed values; inputs such as `yes`, `0123`,
+and `1.0` remain strings, just as they do in Helm.
+
 Find chart roots in a repository:
 
 ```bash
@@ -148,13 +152,25 @@ find . -name Chart.yaml -printf '%h\n' | sort
 
 ## Precedence and tracing
 
-ValueTrace processes supported value sources in this order:
+ValueTrace reports supported value sources in effective precedence order, from
+lowest to highest:
 
 1. `chart/values.yaml`
 2. `-f/--values` files from left to right
 3. `--set` arguments
 
-Later assignments replace earlier scalar or list values; nested mappings merge. `--only-overridden` limits the table to keys assigned at least twice.
+Later assignments replace earlier scalar or list values; nested mappings merge.
+Like Helm, ValueTrace first combines user-supplied values and then coalesces
+unused chart defaults into the result. This preserves defaults correctly even
+when successive files change a path from a map to a scalar and back to a map.
+
+A user-supplied YAML or `--set` `null` removes a key that exists in chart
+defaults. A null key that exists only in user values is preserved. Helm 4 removes
+nulls declared only in chart defaults while Helm 3 preserves them; when invoked
+as a plugin, ValueTrace detects the invoking Helm major version and follows that
+behavior.
+
+`--only-overridden` limits the table to keys assigned at least twice.
 
 ```bash
 helm valuetrace ./chart \
@@ -348,13 +364,13 @@ ValueTrace `v0.1.0` intentionally focuses on local Helm values tracing rather th
 **Supported**
 
 - Local unpacked chart directories
-- Common YAML map layering
-- Nested mapping merges
+- Helm-style YAML map layering and default coalescing
+- Nested mapping merges across repeated values files
 - Later scalar/list replacement
 - Dotted and comma-separated `--set` assignments
 - Structural unknown-key validation and reference comparison
-- YAML scalar parsing for supported `--set` values
-- YAML `null` values
+- Helm-compatible scalar typing for supported `--set` values
+- Version-aware Helm 3/4 YAML `null` behavior
 - Extensible empty mappings
 
 **Not supported in v0.1.0**
@@ -366,6 +382,8 @@ ValueTrace `v0.1.0` intentionally focuses on local Helm values tracing rather th
 - Chart dependency loading
 - Full subchart coalescing behavior
 - Array-index expressions such as `servers[0].port`
+- Escaped dots in `--set` key names
+- Helm brace-list syntax such as `--set names={api,worker}`
 - `--set-string`, `--set-file`, `--set-json`, or `--set-literal`
 - Separate history for duplicate keys inside one YAML document
 
@@ -420,15 +438,15 @@ The included installer creates an independent permanent plugin copy.
 
 ValueTrace `v0.1.0` has been tested with:
 
-- Helm 3 and Helm 4
-- Python 3.10+
+- Helm 3.21.4 and Helm 4.2.4 through automated differential tests
+- Python 3.10, 3.11, 3.12, and 3.13
 - Linux plugin paths reported by `helm env HELM_PLUGINS`
 
 Installation uses POSIX shell scripts; analysis uses Python 3.
 
 ## Development
 
-ValueTrace was developed with AI-assisted tooling to accelerate implementation, testing, and documentation. Behavior was then validated through automated tests, failure scenarios, real plugin installations, Helm 3/4 smoke tests, strict-mode exit-code checks, multi-environment inputs, unknown-key cases, precedence mistakes, and structured-output validation.
+ValueTrace was developed with AI-assisted tooling to accelerate implementation, testing, and documentation. Behavior was then validated through automated tests, failure scenarios, real plugin installations, Helm 3/4 differential tests, strict-mode exit-code checks, multi-environment inputs, unknown-key cases, precedence mistakes, null coalescing, scalar typing, and structured-output validation.
 
 AI accelerated the implementation; the problem definition, supported behavior, limitations, and validation criteria remained explicit engineering decisions.
 
