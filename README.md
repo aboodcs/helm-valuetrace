@@ -8,12 +8,16 @@
 ```bash
 helm upgrade --install api ./chart -f ./values/production.yaml -f ./values/local-debug.yaml
 ```
-**After — inspect the same layers before deployment:**
+**After — trace the same layers and block the debug source:**
 ```bash
-helm valuetrace ./chart -f ./values/production.yaml -f ./values/local-debug.yaml --only-overridden
+helm valuetrace ./chart \
+  -f ./values/production.yaml \
+  -f ./values/local-debug.yaml \
+  --only-overridden \
+  --deny-source '*local-debug*'
 ```
 
-Helm ValueTrace is a **local, read-only Helm plugin** that traces final values back to the file, YAML line, or `--set` argument that supplied them. It also detects unexpected keys, compares configurations with a reference structure, and can block CI on structural validation failures.
+Helm ValueTrace is a **local, read-only Helm plugin** that traces final values back to the file, YAML line, or `--set` argument that supplied them. It also detects unexpected keys, rejects forbidden values files, compares configurations with a reference structure, and can block unsafe CI paths.
 
 The repository contains the plugin only. It does not include demo charts, training labs, Kubernetes manifests, or deployment scenarios.
 
@@ -25,9 +29,12 @@ KEY           FINAL VALUE  SOURCE                   ASSIGNMENTS
 ------------  -----------  -----------------------  -----------
 image.tag     debug        values/local-debug.yaml:4 3
 replicaCount  1            values/local-debug.yaml:8 3
+
+WARNINGS
+- Denied source 'values/local-debug.yaml' matched pattern '*local-debug*'
 ```
 
-The report shows the winning value, its source, and how many times that key was assigned.
+The report shows the winning value, its source, and how many times that key was assigned. With `--deny-source`, the same run exits with code `2` instead of allowing the configuration to continue through CI.
 
 ![Terminal output showing a local debug values file winning over production values because it was applied last](screenshots/precedence-conflict.png)
 
@@ -98,6 +105,7 @@ helm plugin uninstall valuetrace
 - [Usage](#usage)
 - [Precedence and tracing](#precedence-and-tracing)
 - [Validation](#validation)
+- [Source policies](#source-policies)
 - [Reference comparison](#reference-comparison)
 - [Structured output](#structured-output)
 - [CI/CD integration](#cicd-integration)
@@ -230,6 +238,40 @@ helm valuetrace ./chart \
 
 Empty mappings such as `podAnnotations: {}` are treated as extensible so free-form child keys do not create false warnings.
 
+## Source policies
+
+`--deny-source PATTERN` blocks a supplied `-f/--values` file by name or shell-style glob and returns exit code `2`. Quote glob patterns so the shell does not expand them before ValueTrace receives them.
+
+Block one exact filename:
+
+```bash
+helm valuetrace ./chart \
+  -f ./values/production.yaml \
+  -f ./values/local-debug.yaml \
+  --deny-source local-debug.yaml
+```
+
+Block a class of unsafe files:
+
+```bash
+helm valuetrace ./chart \
+  -f ./values/production.yaml \
+  -f ./values/local-debug.yaml \
+  --deny-source '*local-debug*' \
+  --deny-source '*secrets*'
+```
+
+Patterns are case-sensitive and are matched against the path as supplied, its resolved path, and its basename. The option is repeatable. Every supplied values file is checked, even when a later file replaces all of its values.
+
+This policy checks source filenames, not whether their keys are structurally valid. A report can therefore contain `0 unknown keys` and still block a denied source:
+
+```text
+153 final values, 28 overridden values, 0 unknown keys, 0 missing reference keys, 1 denied source
+
+WARNINGS
+- Denied source 'values/local-debug.yaml' matched pattern '*local-debug*'
+```
+
 ## Reference comparison
 
 Use `--reference-values` when a chart has no useful default `values.yaml` or the team maintains a canonical allowed structure:
@@ -265,7 +307,7 @@ helm valuetrace ./chart \
 
 ![Terminal output showing ValueTrace JSON with final values, winning sources, and assignment histories](screenshots/json-output.png)
 
-Structured output has three top-level collections:
+Structured output has four top-level collections:
 
 ```json
 {
@@ -282,11 +324,12 @@ Structured output has three top-level collections:
     }
   ],
   "unknown": [],
-  "missing": []
+  "missing": [],
+  "denied_sources": []
 }
 ```
 
-`values` contains final values, winning sources, and ordered assignment history. `unknown` contains unexpected keys plus an optional suggestion. `missing` contains reference keys absent from the analyzed result.
+`values` contains final values, winning sources, and ordered assignment history. `unknown` contains unexpected keys plus an optional suggestion. `missing` contains reference keys absent from the analyzed result. `denied_sources` contains values files rejected by `--deny-source` and the pattern each one matched.
 
 Warnings go to standard error; structured reports go to standard output.
 
@@ -296,7 +339,8 @@ ValueTrace complements Helm's own checks:
 
 ```bash
 helm lint ./chart -f ./values/production.yaml
-helm valuetrace ./chart -f ./values/production.yaml --strict-unknown
+helm valuetrace ./chart -f ./values/production.yaml \
+  --strict-unknown --deny-source '*debug*'
 helm template api ./chart -f ./values/production.yaml > rendered.yaml
 ```
 
@@ -318,6 +362,7 @@ ValueTrace does not replace linting, schema validation, rendering, diff, or dry-
 | `--reference-values FILE` | Supply an allowed-key structure without merging its values. |
 | `--strict-unknown` | Exit `2` when an override or `--set` contains an unknown key. |
 | `--strict-reference` | Exit `2` when reference comparison finds unknown or missing keys. |
+| `--deny-source PATTERN` | Exit `2` when a supplied `-f` file matches a filename or glob; repeatable. |
 | `-o FORMAT`, `--output FORMAT` | `table`, `json`, or `yaml`; default `table`. |
 | `--only-overridden` | Show only keys assigned at least twice. |
 | `-h`, `--help` | Show help. |
@@ -333,7 +378,7 @@ helm valuetrace --help
 | ---: | --- |
 | `0` | Analysis completed; no enabled strict validation failed. |
 | `1` | Input/usage error: for example missing chart/file, invalid YAML, or invalid `--set`. |
-| `2` | An enabled strict validation check found unknown or missing keys. |
+| `2` | A validation check found structural issues or a source policy blocked a values file. |
 
 For non-zero plugin exits, Helm may also print:
 
@@ -369,6 +414,7 @@ ValueTrace `v0.1.0` intentionally focuses on local Helm values tracing rather th
 - Later scalar/list replacement
 - Dotted and comma-separated `--set` assignments
 - Structural unknown-key validation and reference comparison
+- Repeatable filename and glob policies for denied `-f` sources
 - Helm-compatible scalar typing for supported `--set` values
 - Version-aware Helm 3/4 YAML `null` behavior
 - Extensible empty mappings

@@ -70,6 +70,15 @@ def flatten_values(value: Any, prefix: PathKey = ()) -> dict[PathKey, Any]:
     return {prefix: value}
 
 
+def _known_paths(value: Any, prefix: PathKey = ()) -> set[PathKey]:
+    """Collect both mapping parents and leaves as structurally known paths."""
+    paths = {prefix} if prefix else set()
+    if isinstance(value, dict):
+        for key, child in value.items():
+            paths.update(_known_paths(child, prefix + (str(key),)))
+    return paths
+
+
 def _collect_line_numbers(node: Node | None, prefix: PathKey = ()) -> dict[PathKey, int]:
     if node is None:
         return {}
@@ -335,10 +344,10 @@ def trace_values(
     history: dict[PathKey, list[Assignment]] = {}
     unknown_entries: list[tuple[PathKey, str]] = []
 
-    known = set(flatten_values(default_values))
+    known = _known_paths(default_values)
     flexible = _flexible_prefixes(default_values)
     if reference_values is not None:
-        known.update(flatten_values(reference_values))
+        known.update(_known_paths(reference_values))
         flexible.update(_flexible_prefixes(reference_values))
 
     # Helm first merges all user-supplied files and --set values, then

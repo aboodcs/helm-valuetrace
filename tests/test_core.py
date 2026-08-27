@@ -181,6 +181,7 @@ class TraceValuesTests(unittest.TestCase):
             result.values["service"],
             {"port": 8080, "type": "ClusterIP"},
         )
+        self.assertEqual(result.unknown, [])
 
     def test_chart_default_null_handling_tracks_helm_major_version(self) -> None:
         common = {

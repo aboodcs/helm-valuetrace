@@ -29,12 +29,14 @@ class CliTests(unittest.TestCase):
 
         self.development = self.workspace / "values-development.yaml"
         self.production = self.workspace / "values-production.yaml"
+        self.local_debug = self.workspace / "values-local-debug.yaml"
         self.typo = self.workspace / "values-typo.yaml"
         self.reference = self.workspace / "values-reference.yaml"
         self.actual = self.workspace / "values-actual.yaml"
 
         self._write(self.development, "replicaCount: 2\nimage:\n  tag: dev\n")
         self._write(self.production, "replicaCount: 4\nimage:\n  tag: production\n")
+        self._write(self.local_debug, "replicaCount: 1\nimage:\n  tag: debug\n")
         self._write(self.typo, "image:\n  repostory: custom/nginx\n")
         self._write(
             self.reference,
@@ -79,6 +81,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("Required argument", process.stdout)
         self.assertIn("Value sources", process.stdout)
         self.assertIn("Validation", process.stdout)
+        self.assertIn("--deny-source PATTERN", process.stdout)
         self.assertIn("Output", process.stdout)
         self.assertIn("VALUE PRECEDENCE", process.stdout)
         self.assertIn("EXIT CODES", process.stdout)
@@ -137,6 +140,95 @@ class CliTests(unittest.TestCase):
         self.assertEqual(document["unknown"][0]["key"], "image.repostory")
         self.assertIn("WARNINGS", process.stderr)
         self.assertIn("image.repository", process.stderr)
+
+    def test_deny_source_blocks_a_matching_values_file(self) -> None:
+        process = self.run_cli(
+            str(self.chart),
+            "-f",
+            str(self.production),
+            "-f",
+            str(self.local_debug),
+            "--deny-source",
+            "values-local-debug.yaml",
+            "--only-overridden",
+        )
+
+        self.assertEqual(process.returncode, 2)
+        self.assertIn("1 denied source", process.stdout)
+        self.assertIn("Denied source", process.stderr)
+        self.assertIn(str(self.local_debug), process.stderr)
+        self.assertIn("values-local-debug.yaml", process.stderr)
+
+    def test_deny_source_supports_globs_and_structured_output(self) -> None:
+        process = self.run_cli(
+            str(self.chart),
+            "-f",
+            str(self.local_debug),
+            "--deny-source",
+            "*secrets*",
+            "--deny-source",
+            "*local-debug*",
+            "--output",
+            "json",
+        )
+
+        self.assertEqual(process.returncode, 2)
+        document = json.loads(process.stdout)
+        self.assertEqual(
+            document["denied_sources"],
+            [
+                {
+                    "source": str(self.local_debug),
+                    "pattern": "*local-debug*",
+                }
+            ],
+        )
+        self.assertIn("WARNINGS", process.stderr)
+
+    def test_deny_source_checks_every_supplied_file_not_only_the_winner(self) -> None:
+        process = self.run_cli(
+            str(self.chart),
+            "-f",
+            str(self.local_debug),
+            "-f",
+            str(self.production),
+            "--deny-source",
+            "values-local-debug.yaml",
+            "--output",
+            "json",
+        )
+
+        self.assertEqual(process.returncode, 2)
+        document = json.loads(process.stdout)
+        image_tag = next(item for item in document["values"] if item["key"] == "image.tag")
+        self.assertEqual(image_tag["value"], "production")
+        self.assertEqual(len(document["denied_sources"]), 1)
+
+    def test_deny_source_allows_nonmatching_values_files(self) -> None:
+        process = self.run_cli(
+            str(self.chart),
+            "-f",
+            str(self.production),
+            "--deny-source",
+            "*local-debug*",
+            "--output",
+            "json",
+        )
+
+        self.assertEqual(process.returncode, 0, process.stderr)
+        document = json.loads(process.stdout)
+        self.assertEqual(document["denied_sources"], [])
+        self.assertEqual(process.stderr, "")
+
+    def test_deny_source_rejects_an_empty_pattern(self) -> None:
+        process = self.run_cli(
+            str(self.chart),
+            "--deny-source",
+            "",
+        )
+
+        self.assertEqual(process.returncode, 1)
+        self.assertIn("--deny-source PATTERN must not be empty", process.stderr)
 
     def test_reference_comparison_reports_unknown_and_missing_keys(self) -> None:
         process = self.run_cli(
