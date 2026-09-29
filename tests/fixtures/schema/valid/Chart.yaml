@@ -1,0 +1,4 @@
+apiVersion: v2
+name: valid-schema-chart
+description: Chart with JSON schema and valid values
+version: 0.1.0

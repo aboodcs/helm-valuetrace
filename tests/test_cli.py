@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -65,7 +65,7 @@ class CliTests(unittest.TestCase):
         environment = os.environ.copy()
         environment["PYTHONPATH"] = str(PROJECT_ROOT / "src")
         return subprocess.run(
-            ["python3", "-m", "helm_valuetrace.cli", *arguments],
+            [sys.executable, "-m", "helm_valuetrace.cli", *arguments],
             cwd=PROJECT_ROOT,
             env=environment,
             text=True,
@@ -91,7 +91,7 @@ class CliTests(unittest.TestCase):
         process = self.run_cli("--version")
 
         self.assertEqual(process.returncode, 0, process.stderr)
-        self.assertEqual(process.stdout.strip(), "Helm ValueTrace 0.1.0")
+        self.assertEqual(process.stdout.strip(), "Helm ValueTrace 0.2.0")
 
     def test_json_output_contains_final_source(self) -> None:
         process = self.run_cli(
@@ -278,6 +278,34 @@ class CliTests(unittest.TestCase):
         self.assertEqual(process.returncode, 1)
         self.assertIn("invalid choice", process.stderr)
         self.assertNotIn("Traceback", process.stderr)
+
+    def test_missing_chart_yaml_returns_status_three(self) -> None:
+        empty_dir = self.workspace / "empty-chart"
+        empty_dir.mkdir()
+        process = self.run_cli(str(empty_dir))
+
+        self.assertEqual(process.returncode, 3)
+        self.assertIn("Chart.yaml not found in", process.stderr)
+        self.assertNotIn("Traceback", process.stderr)
+
+    def test_cli_flexible_option_placement(self) -> None:
+        proc1 = self.run_cli(str(self.chart), "-f", str(self.production), "explain", "image.tag")
+        self.assertEqual(proc1.returncode, 0, proc1.stderr)
+        self.assertIn("production", proc1.stdout)
+
+        proc2 = self.run_cli(str(self.chart), "--set", "replicaCount=99", "explain", "replicaCount")
+        self.assertEqual(proc2.returncode, 0, proc2.stderr)
+        self.assertIn("99", proc2.stdout)
+
+        proc3 = self.run_cli(str(self.chart), "--output", "json", "explain", "replicaCount")
+        self.assertEqual(proc3.returncode, 0, proc3.stderr)
+        doc = json.loads(proc3.stdout)
+        self.assertEqual(doc["key"], "replicaCount")
+
+        proc4 = self.run_cli("-o", "json", str(self.chart))
+        self.assertEqual(proc4.returncode, 0, proc4.stderr)
+        doc4 = json.loads(proc4.stdout)
+        self.assertIn("values", doc4)
 
 
 if __name__ == "__main__":

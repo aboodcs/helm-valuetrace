@@ -1,0 +1,5 @@
+replicaCount: 4
+image:
+  tag: production
+credentials:
+  password: FAKE_PRODUCTION_PASSWORD

@@ -1,0 +1,4 @@
+apiVersion: v2
+name: security-chart
+description: A chart with sensitive-looking keys for redaction testing
+version: 0.1.0

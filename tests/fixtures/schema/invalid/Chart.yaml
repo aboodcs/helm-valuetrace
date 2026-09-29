@@ -1,0 +1,4 @@
+apiVersion: v2
+name: invalid-schema-chart
+description: Chart with JSON schema and invalid default values (for testing)
+version: 0.1.0

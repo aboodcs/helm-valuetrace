@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["image", "replicaCount"],
+  "properties": {
+    "replicaCount": {"type": "integer", "minimum": 1},
+    "image": {
+      "type": "object", "additionalProperties": false,
+      "required": ["repository", "tag"],
+      "properties": {"repository": {"type": "string"}, "tag": {"type": "string"}}
+    },
+    "service": {"type": "object", "properties": {"port": {"type": "integer"}, "type": {"type": "string"}}},
+    "credentials": {"type": "object"},
+    "users": {"type": "array"}
+  }
+}

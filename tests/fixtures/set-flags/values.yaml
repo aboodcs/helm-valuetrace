@@ -1,0 +1,7 @@
+app:
+  name: demo
+  enabled: true
+  replicas: 2
+  config: "default-config"
+  data:
+    key1: val1

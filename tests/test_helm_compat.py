@@ -11,12 +11,10 @@ from pathlib import Path
 
 import yaml
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from helm_valuetrace.core import flatten_values, path_text  # noqa: E402
-
 
 HELM_BIN = os.environ.get("HELM_BIN") or shutil.which("helm")
 
@@ -133,10 +131,7 @@ data:
         self.assertEqual(valuetrace.returncode, 0, valuetrace.stderr)
         report = json.loads(valuetrace.stdout)
 
-        expected = {
-            path_text(path): value
-            for path, value in flatten_values(helm_values).items()
-        }
+        expected = {path_text(path): value for path, value in flatten_values(helm_values).items()}
         actual = {row["key"]: row["value"] for row in report["values"]}
 
         self.assertEqual(actual, expected)

@@ -1,0 +1,16 @@
+servers:
+  - host: server-a.internal
+    port: 8080
+  - host: server-b.internal
+    port: 8081
+
+tags:
+  - web
+  - production
+
+ingress:
+  hosts:
+    - host: example.local
+      paths:
+        - path: /
+          pathType: Prefix

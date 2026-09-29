@@ -1,0 +1,27 @@
+# Fixture chart with sensitive-looking keys — all values are FAKE for testing only.
+# IMPORTANT: These are NOT real secrets. Do not use these values in production.
+
+image:
+  repository: nginx
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Sensitive keys (should be redacted by default)
+adminPassword: FAKE_SECRET_DO_NOT_USE
+apiToken: FAKE_TOKEN_DO_NOT_USE
+databaseSecret: FAKE_SECRET_DO_NOT_USE
+apiKey: FAKE_API_KEY_DO_NOT_USE
+privateKey: FAKE_PRIVATE_KEY_DO_NOT_USE
+auth:
+  username: admin
+  password: FAKE_PASSWORD_DO_NOT_USE
+
+credentials:
+  accessKey: FAKE_ACCESS_KEY_DO_NOT_USE
+  secretKey: FAKE_SECRET_KEY_DO_NOT_USE
+
+# Non-sensitive keys (should not be redacted)
+replicaCount: 1
+service:
+  port: 80
+  type: ClusterIP

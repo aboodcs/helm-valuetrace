@@ -1,0 +1,7 @@
+replicaCount: 2
+image:
+  tag: development
+service:
+  type: LoadBalancer
+credentials:
+  password: FAKE_DEVELOPMENT_PASSWORD

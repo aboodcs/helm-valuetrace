@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: arrays-values
+data:
+  values: |
+    {{ toJson .Values }}

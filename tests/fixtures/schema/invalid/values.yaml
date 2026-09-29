@@ -1,0 +1,7 @@
+# Invalid: replicaCount is string (should be integer)
+# And service.port is above maximum
+replicaCount: "not-an-integer"
+image:
+  repository: nginx
+service:
+  port: 99999

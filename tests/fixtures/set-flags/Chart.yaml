@@ -1,0 +1,4 @@
+apiVersion: v2
+name: set-flags
+description: A chart for testing set flags
+version: 0.1.0

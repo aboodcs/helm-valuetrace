@@ -19,4 +19,4 @@ if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,
 fi
 
 export PYTHONPATH="$PLUGIN_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
-exec "$PYTHON_BIN" -m helm_valuetrace.cli "$@"
+exec "$PYTHON_BIN" -c 'import sys; del sys.path[0]; import runpy; runpy.run_module("helm_valuetrace.cli", run_name="__main__")' "$@"

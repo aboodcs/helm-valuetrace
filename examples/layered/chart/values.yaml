@@ -1,0 +1,12 @@
+replicaCount: 1
+image:
+  repository: nginx
+  tag: stable
+service:
+  port: 80
+  type: ClusterIP
+credentials:
+  password: FAKE_DEFAULT_PASSWORD
+users:
+  - name: demo
+    token: FAKE_ARRAY_TOKEN

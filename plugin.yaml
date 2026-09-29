@@ -1,5 +1,5 @@
 name: valuetrace
-version: 0.1.0
+version: 0.2.0
 usage: Trace, validate, and compare Helm values
 description: Shows where final Helm values came from and detects configuration drift.
 ignoreFlags: false

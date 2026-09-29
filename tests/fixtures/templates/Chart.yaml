@@ -1,0 +1,4 @@
+apiVersion: v2
+name: template-chart
+description: Chart for template analysis testing
+version: 0.1.0

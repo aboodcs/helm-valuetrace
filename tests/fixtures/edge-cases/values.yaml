@@ -1,0 +1,10 @@
+"dotted.key.example": literal-dot-value
+emptyString: ""
+zeroInteger: 0
+booleanTrue: true
+booleanFalse: false
+nested:
+  level1:
+    level2:
+      deepValue: found
+nullValue: null

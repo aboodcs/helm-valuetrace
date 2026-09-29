@@ -1,0 +1,4 @@
+servicePort: 8080
+enabled: false
+image:
+  pullPolicy: IfNotPresent

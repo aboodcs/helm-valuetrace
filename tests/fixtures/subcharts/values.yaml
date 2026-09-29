@@ -1,0 +1,12 @@
+replicaCount: 1
+image:
+  repository: nginx
+
+# Override values for mysubchart
+mysubchart:
+  servicePort: 9090
+  enabled: true
+
+# Global values propagated to all subcharts
+global:
+  storageClass: standard

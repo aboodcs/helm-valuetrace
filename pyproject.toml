@@ -1,0 +1,114 @@
+[project]
+name = "helm-valuetrace"
+version = "0.2.0"
+description = "Trace, validate, and compare values used by Helm charts"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Abdulrehman Abulaban", email = "aboodcs@github.com" }]
+requires-python = ">=3.10"
+keywords = ["helm", "kubernetes", "devops", "values", "provenance"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: System :: Systems Administration",
+]
+dependencies = [
+    "PyYAML>=6.0,<8.0",
+    "jsonschema>=4.18.0,<5",
+    "referencing>=0.28.0,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.4.0",
+    "pytest>=7.0",
+]
+
+[project.scripts]
+helm-valuetrace = "helm_valuetrace.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/aboodcs/helm-valuetrace"
+Repository = "https://github.com/aboodcs/helm-valuetrace"
+Issues = "https://github.com/aboodcs/helm-valuetrace/issues"
+Changelog = "https://github.com/aboodcs/helm-valuetrace/blob/main/CHANGELOG.md"
+
+[build-system]
+requires = ["setuptools>=77.0.3", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+helm_valuetrace = ["py.typed"]
+
+[tool.setuptools.data-files]
+"." = ["plugin.yaml", "requirements.txt"]
+"scripts" = ["scripts/install.sh"]
+"bin" = ["bin/valuetrace"]
+
+# ---------------------------------------------------------------------------
+# Ruff — linting and formatting
+# ---------------------------------------------------------------------------
+[tool.ruff]
+src = ["src"]
+line-length = 100
+target-version = "py310"
+extend-exclude = [".devdeps", ".audit-evidence", "helm-megalab-1gb", ".helm-plugins"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "TCH",  # flake8-type-checking
+    "RUF",  # ruff-specific rules
+    "C4",   # flake8-comprehensions
+    "PTH",  # flake8-use-pathlib
+    "TID",  # flake8-tidy-imports
+    "PIE",  # flake8-pie
+    "PL",   # pylint
+]
+ignore = [
+    "PLR0912",  # too many branches — acceptable in parsers
+    "PLR0913",  # too many arguments — acceptable for trace_values()
+    "PLR2004",  # magic value comparison — acceptable for port/status checks
+    "B008",     # do not perform function calls in default arguments
+    "PL",       # pylint — too noisy for now
+    "TC003",    # type-checking imports — used at runtime, not just for type checking
+    "TC001",    # same reason
+    "TC002",    # same reason
+    "RUF005",   # tuple concatenation — existing style is intentional and readable
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["helm_valuetrace"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-v --tb=short"

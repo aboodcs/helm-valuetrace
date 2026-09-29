@@ -1,518 +1,318 @@
 # Helm ValueTrace
 
-> **Helm tells you what won. ValueTrace tells you where it came from.**
+> Trace exactly where every Helm value came from.
 
-[![Version](https://img.shields.io/badge/version-v0.1.0-2563eb.svg)](https://github.com/aboodcs/helm-valuetrace/releases) [![Helm](https://img.shields.io/badge/Helm-3%20%7C%204-0f1689.svg?logo=helm)](https://helm.sh/) [![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab.svg?logo=python&logoColor=white)](https://www.python.org/) [![License](https://img.shields.io/badge/license-MIT-16a34a.svg)](LICENSE) [![CI](https://github.com/aboodcs/helm-valuetrace/actions/workflows/test.yaml/badge.svg)](https://github.com/aboodcs/helm-valuetrace/actions/workflows/test.yaml)
+[![Version](https://img.shields.io/badge/version-v0.2.0-2563eb.svg)](https://github.com/aboodcs/helm-valuetrace/releases)
+[![Helm](https://img.shields.io/badge/Helm-3%20%7C%204-0f1689.svg?logo=helm)](https://helm.sh/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-16a34a.svg)](LICENSE)
+[![CI](https://github.com/aboodcs/helm-valuetrace/actions/workflows/test.yaml/badge.svg)](https://github.com/aboodcs/helm-valuetrace/actions/workflows/test.yaml)
 
-**Before — a debug file silently wins because it is last:**
-```bash
-helm upgrade --install api ./chart -f ./values/production.yaml -f ./values/local-debug.yaml
-```
-**After — trace the same layers and block the debug source:**
-```bash
-helm valuetrace ./chart \
-  -f ./values/production.yaml \
-  -f ./values/local-debug.yaml \
-  --only-overridden \
-  --deny-source '*local-debug*'
-```
+Helm ValueTrace is a local, read-only debugging and auditing tool for Helm values. It shows the final value, the winning source, and the assignment history that produced it across chart defaults, `-f` values files, and `--set*` arguments.
 
-Helm ValueTrace is a **local, read-only Helm plugin** that traces final values back to the file, YAML line, or `--set` argument that supplied them. It also detects unexpected keys, rejects forbidden values files, compares configurations with a reference structure, and can block unsafe CI paths.
+![Helm ValueTrace overview](screenshots/v0.2.0-overview.png)
 
-The repository contains the plugin only. It does not include demo charts, training labs, Kubernetes manifests, or deployment scenarios.
+---
 
-## 30-second proof
+## Why ValueTrace?
 
-```text
-HELM VALUETRACE
-KEY           FINAL VALUE  SOURCE                   ASSIGNMENTS
-------------  -----------  -----------------------  -----------
-image.tag     debug        values/local-debug.yaml:4 3
-replicaCount  1            values/local-debug.yaml:8 3
+Helm values arrive from chart `values.yaml` defaults, multiple environment `-f` files, and CI `--set*` arguments. Later sources silently overwrite earlier settings. Native `helm template` outputs only final Kubernetes manifests, while `helm get values` displays only raw user inputs. Neither command identifies which file or argument set `replicaCount` or toggled an ingress setting. ValueTrace makes resolution transparent and auditable before deployment.
 
-WARNINGS
-- Denied source 'values/local-debug.yaml' matched pattern '*local-debug*'
-```
+---
 
-The report shows the winning value, its source, and how many times that key was assigned. With `--deny-source`, the same run exits with code `2` instead of allowing the configuration to continue through CI.
+## Installation
 
-![Terminal output showing a local debug values file winning over production values because it was applied last](screenshots/precedence-conflict.png)
-
-> All screenshots were captured from a local demo lab using `./charts/atlas-platform` and the `scenarios/` folder for illustration only; the lab is not included in this repository, so substitute your own chart and values files.
-
-## Install
-
-### Requirements
-
-- Helm 3 or Helm 4
-- Python 3.10+
-- Python virtual-environment support
-- Git
-- Internet access during first installation
+Requirements: Helm 3 or 4, Python 3.10+, Git.
 
 ```bash
-helm version
-python3 --version
-git --version
+# Helm 4
+helm plugin install https://github.com/aboodcs/helm-valuetrace --verify=false
+
+# Helm 3
+helm plugin install https://github.com/aboodcs/helm-valuetrace
+
+# Verify installation
+helm valuetrace --version
+# Output: Helm ValueTrace 0.2.0
 ```
 
-### Install from GitHub
+> Helm 4 enables plugin source verification by default. When installing directly from the Git repository, use `--verify=false`.
+
+### From Local Checkout
 
 ```bash
 git clone https://github.com/aboodcs/helm-valuetrace.git
 cd helm-valuetrace
-chmod +x install-local.sh uninstall-local.sh
 ./install-local.sh
 ```
 
-`install-local.sh` copies the plugin into Helm's plugin directory, creates an isolated Python environment, installs dependencies from `requirements.txt`, and verifies that Helm can discover the plugin. It does not modify system Python.
+For air-gapped environments: download wheels with `pip download -r requirements.txt -d wheelhouse`, transfer them, and run `PIP_NO_INDEX=1 PIP_FIND_LINKS=wheelhouse ./install-local.sh`.
 
-Verify:
+To uninstall: `helm plugin uninstall valuetrace` (or `./uninstall-local.sh`).
+
+---
+
+## Quick Start
+
+These examples use the sample chart in this repository. Clone the repo to follow along.
+
+Trace a chart's default values:
 
 ```bash
-helm plugin list
-helm valuetrace --version
-helm valuetrace --help
+helm valuetrace ./examples/layered/chart
 ```
 
-Expected version:
+Trace layered values files and command-line overrides:
+
+```bash
+helm valuetrace ./examples/layered/chart \
+  -f ./examples/layered/development.yaml \
+  -f ./examples/layered/production.yaml \
+  --set image.tag=v2.0.0
+```
 
 ```text
-0.1.0
-```
-
-**Done.** ValueTrace is installed once and can be used with any local unpacked chart.
-
-For development only, install dependencies manually:
-
-```bash
-python3 -m venv .env
-source .env/bin/activate
-python3 -m pip install --upgrade pip
-python3 -m pip install -r requirements.txt
-```
-
-Uninstall:
-
-```bash
-helm plugin uninstall valuetrace
+HELM VALUETRACE
+KEY                   FINAL VALUE                           SOURCE                                 ASSIGNMENTS
+--------------------  ------------------------------------  -------------------------------------  -----------
+credentials.password  <redacted>                            examples/layered/production.yaml:5     3
+image.repository      nginx                                 examples/layered/chart/values.yaml:3   1
+image.tag             v2.0.0                                --set[1]                               4
+replicaCount          4                                     examples/layered/production.yaml:1     3
+service.port          80                                    examples/layered/chart/values.yaml:6   1
+service.type          LoadBalancer                          examples/layered/development.yaml:5    2
+users                 [{"name":"demo","token":"<redacted>…  examples/layered/chart/values.yaml:11  1
 ```
 
 ---
 
-## Documentation
+## Core Features
 
-- [Usage](#usage)
-- [Precedence and tracing](#precedence-and-tracing)
-- [Validation](#validation)
-- [Source policies](#source-policies)
-- [Reference comparison](#reference-comparison)
-- [Structured output](#structured-output)
-- [CI/CD integration](#cicd-integration)
-- [Command reference](#command-reference)
-- [Exit codes](#exit-codes)
-- [Safety and privacy](#safety-and-privacy)
-- [Scope and limitations](#scope-and-limitations)
-- [Troubleshooting](#troubleshooting)
-- [Compatibility](#compatibility)
-- [Development](#development)
-- [Contributing](#contributing)
-- [License](#license)
+- **Exact value provenance:** Trace every key back to its source file and YAML line number or CLI argument.
+- **Override history:** Filter to overridden keys with `--only-overridden`, then inspect history with `--explain`.
+- **Helm-compatible `--set*` support:** Accurately parses `--set`, `--set-string`, `--set-json`, `--set-file`, and `--set-literal`.
+- **Unknown-key detection:** Catch misspelled keys with similarity-based hints before deploying.
+- **Schema validation:** Validate against `values.schema.json` with strict failure modes (`--strict-schema`).
+- **Automatic secret redaction:** Passwords, tokens, and credentials are automatically masked in all outputs by default.
+- **Structured output:** Export results to human-readable `table`, automation-ready `json`, or structured `yaml`.
+- **Policy enforcement:** Block unauthorized debug files (`--deny-source`) or CLI overrides (`--deny-cli-overrides`) in CI.
 
-## Usage
+---
 
-The first argument must be a local unpacked Helm chart directory containing `Chart.yaml`.
+## Value Precedence
+
+ValueTrace uses Helm's value precedence order (lowest to highest):
 
 ```text
-helm valuetrace CHART [options]
+Chart defaults (values.yaml)
+      ↓
+-f values files (left to right)
+      ↓
+--set-json
+      ↓
+--set
+      ↓
+--set-string
+      ↓
+--set-file
+      ↓
+--set-literal
 ```
 
+User layers are evaluated first, after which chart defaults coalesce into any unassigned paths.
+
+![Helm ValueTrace value precedence](screenshots/v0.2.0-precedence.png)
+
+---
+
+## Explain Mode
+
+Use `--explain KEY` to inspect a key's winning source and complete assignment history:
+
 ```bash
-helm valuetrace ./chart
-
-helm valuetrace ./chart \
-  -f ./values/base.yaml \
-  -f ./values/production.yaml
-
-helm valuetrace ./chart \
-  -f ./values/production.yaml \
+helm valuetrace ./examples/layered/chart \
+  -f ./examples/layered/development.yaml \
+  -f ./examples/layered/production.yaml \
   --set image.tag=v2.0.0 \
-  --set replicaCount=5
-```
-
-A single `--set` may contain comma-separated assignments:
-
-```bash
-helm valuetrace ./chart --set image.tag=v2.0.0,replicaCount=5
-```
-
-For supported scalar values, `--set` uses Helm's typing rules. `true`, `false`,
-`null`, and base-10 integers receive typed values; inputs such as `yes`, `0123`,
-and `1.0` remain strings, just as they do in Helm.
-
-Find chart roots in a repository:
-
-```bash
-find . -name Chart.yaml -printf '%h\n' | sort
-```
-
-`-f/--values` expects a YAML file, not a directory.
-
-## Precedence and tracing
-
-ValueTrace reports supported value sources in effective precedence order, from
-lowest to highest:
-
-1. `chart/values.yaml`
-2. `-f/--values` files from left to right
-3. `--set` arguments
-
-Later assignments replace earlier scalar or list values; nested mappings merge.
-Like Helm, ValueTrace first combines user-supplied values and then coalesces
-unused chart defaults into the result. This preserves defaults correctly even
-when successive files change a path from a map to a scalar and back to a map.
-
-A user-supplied YAML or `--set` `null` removes a key that exists in chart
-defaults. A null key that exists only in user values is preserved. Helm 4 removes
-nulls declared only in chart defaults while Helm 3 preserves them; when invoked
-as a plugin, ValueTrace detects the invoking Helm major version and follows that
-behavior.
-
-`--only-overridden` limits the table to keys assigned at least twice.
-
-```bash
-helm valuetrace ./chart \
-  -f ./values/base.yaml \
-  -f ./values/production.yaml \
-  --only-overridden
-```
-
-![Terminal output tracing layered platform and production Helm values with each final value and winning source](screenshots/production-trace.png)
-
-Command-line overrides are traced as sources such as `--set[1]`:
-
-```bash
-helm valuetrace ./chart \
-  --set image.tag=v2.1.0 \
-  --set replicaCount=8 \
-  --only-overridden
-```
-
-![Terminal output showing image tag and replica count overridden by command-line set arguments](screenshots/set-overrides.png)
-
-The default table columns are:
-
-| Column | Meaning |
-| --- | --- |
-| `KEY` | Flattened YAML path, for example `image.repository`. |
-| `FINAL VALUE` | Value remaining after supported layers are processed. |
-| `SOURCE` | Winning file and YAML line, or `--set[n]`. |
-| `ASSIGNMENTS` | Number of assignments recorded for the key. |
-
-## Validation
-
-Without `--reference-values`, known keys come from the chart's default `values.yaml`. With a reference file, known keys are the union of chart-default and reference keys.
-
-Unexpected keys produce warnings and may receive similarity-based spelling suggestions:
-
-```yaml
-image:
-  repostory: registry.example.com/api
+  --explain image.tag
 ```
 
 ```text
-Unknown key 'image.repostory'; did you mean 'image.repository'?
+image.tag
+
+Final value:
+  v2.0.0
+
+Source history:
+  examples/layered/chart/values.yaml:4: stable (default, overridden; image.tag)
+  examples/layered/development.yaml:3: development (values-file, overridden; image.tag)
+  examples/layered/production.yaml:3: production (values-file, overridden; image.tag)
+  --set[1]: v2.0.0 (set, contributing; image.tag)
+
+Final winner:
+  --set[1]
 ```
 
-![Terminal output detecting misspelled Helm value keys and suggesting the closest known keys](screenshots/unknown-key-detection.png)
+![Helm ValueTrace precedence trace](screenshots/v0.2.0-terminal-precedence.png)
 
-Enable CI-blocking validation with:
+---
 
-```bash
-helm valuetrace ./chart \
-  -f ./values/production.yaml \
-  --strict-unknown
-```
+## CLI Overrides
 
-`--strict-unknown` returns exit code `2` when an override file or `--set` introduces an unknown key. Suggestions are hints only; ValueTrace never rewrites configuration.
+ValueTrace models Helm's command-line override options:
 
-Empty mappings such as `podAnnotations: {}` are treated as extensible so free-form child keys do not create false warnings.
+| Flag | Purpose |
+| --- | --- |
+| `--set KEY=VALUE` | Standard typed override with scalar coercion (`true`, `123`, `null`) |
+| `--set-string KEY=VALUE` | Force value to be treated strictly as a string |
+| `--set-json KEY=JSON` | Parse value as JSON (objects, arrays, numbers, booleans) |
+| `--set-file KEY=PATH` | Set key to the contents of a local file as a string |
+| `--set-literal KEY=VALUE` | Preserve literal string value without comma or escape splitting |
 
-## Source policies
+---
 
-`--deny-source PATTERN` blocks a supplied `-f/--values` file by name or shell-style glob and returns exit code `2`. Quote glob patterns so the shell does not expand them before ValueTrace receives them.
+## Validation & Policy Enforcement
 
-Block one exact filename:
+Enforce configuration correctness and block dangerous patterns in CI:
 
-```bash
-helm valuetrace ./chart \
-  -f ./values/production.yaml \
-  -f ./values/local-debug.yaml \
-  --deny-source local-debug.yaml
-```
+- **`--strict-unknown`**: Exits with code `2` if values files declare keys absent from defaults or schema. Suggests corrections for typos (e.g. `image.repostory` &rarr; `image.repository`).
+- **`--strict-schema`**: Exits with code `2` if values fail `values.schema.json` validation (default: warn only).
+- **`--reference-values FILE`**: Compare against a canonical key structure without merging its values (use `--strict-reference` to exit `2` on discrepancies).
+- **`--deny-source PATTERN`**: Exits with code `2` if a `-f` file matches a name or glob pattern (e.g. `'*local-debug*'`).
+- **`--deny-cli-overrides`**: Exits with code `2` if any `--set*` flag is supplied, enforcing pure file-driven GitOps.
 
-Block a class of unsafe files:
+![Helm ValueTrace policy validation](screenshots/v0.2.0-terminal-policy.png)
 
-```bash
-helm valuetrace ./chart \
-  -f ./values/production.yaml \
-  -f ./values/local-debug.yaml \
-  --deny-source '*local-debug*' \
-  --deny-source '*secrets*'
-```
+---
 
-Patterns are case-sensitive and are matched against the path as supplied, its resolved path, and its basename. The option is repeatable. Every supplied values file is checked, even when a later file replaces all of its values.
+## Secret Redaction
 
-This policy checks source filenames, not whether their keys are structurally valid. A report can therefore contain `0 unknown keys` and still block a denied source:
+**Secret redaction is enabled by default.**
+
+Keys matching sensitive names (`password`, `token`, `secret`, `api_key`, `credentials`) are masked as `<redacted>` in table, JSON, YAML, and explain modes:
 
 ```text
-153 final values, 28 overridden values, 0 unknown keys, 0 missing reference keys, 1 denied source
-
-WARNINGS
-- Denied source 'values/local-debug.yaml' matched pattern '*local-debug*'
+KEY                   FINAL VALUE
+credentials.password  <redacted>
+users[0].token        <redacted>
 ```
 
-## Reference comparison
+- `--redact-path PATH`: Redact specific exact paths and their children.
+- `--redact-pattern PATTERN`: Add custom glob patterns for sensitive key names.
+- `--no-redact`: Disable redaction to reveal plaintext values.
 
-Use `--reference-values` when a chart has no useful default `values.yaml` or the team maintains a canonical allowed structure:
+> Automatic redaction is heuristic and should not be treated as a guarantee that every possible secret will be detected. Always review reports before sharing.
+
+---
+
+## Output Formats
+
+ValueTrace supports three output formats (default: `table`):
 
 ```bash
-helm valuetrace ./chart \
-  --reference-values ./values/reference.yaml \
-  -f ./values/staging.yaml
+helm valuetrace ./examples/layered/chart -o json > report.json
+helm valuetrace ./examples/layered/chart -o yaml > report.yaml
 ```
 
-The reference contributes **keys only**, not values. Keys present only in the analyzed configuration are `unknown`; reference keys absent from the analyzed result are `missing`.
+JSON and YAML outputs include final values, typed paths, contributing sources, and ordered assignment histories for automated CI/CD tooling.
 
-To fail validation on either difference:
+---
+
+## Common Examples
 
 ```bash
-helm valuetrace ./chart \
-  --reference-values ./values/reference.yaml \
-  -f ./values/staging.yaml \
-  --strict-reference
+# 1. Trace chart defaults
+helm valuetrace ./examples/layered/chart
+
+# 2. Trace multiple values files and filter to overridden keys
+helm valuetrace ./examples/layered/chart -f ./examples/layered/development.yaml -f ./examples/layered/production.yaml --only-overridden
+
+# 3. Deep-dive into a single key's assignment history
+helm valuetrace ./examples/layered/chart -f ./examples/layered/production.yaml --explain image.tag
+
+# 4. Fail CI on unexpected keys or schema violations
+helm valuetrace ./examples/layered/chart -f ./examples/layered/production.yaml --strict-schema --strict-unknown
+
+# 5. Block debug values files from production deployments
+helm valuetrace ./examples/layered/chart \
+  -f ./examples/layered/development.yaml \
+  -f ./examples/layered/production.yaml \
+  --deny-source '*development*'
 ```
 
-Reference comparison is structural: `unknown` does not mean Helm would reject a key, and `missing` does not mean the application requires it at runtime. Use a maintained, non-secret reference file.
+See [examples/layered](examples/layered/README.md) for a cluster-free, multi-environment walkthrough.
 
-## Structured output
+---
 
-Use `--output json` or `--output yaml` for automation:
+## Exit Codes
 
-```bash
-helm valuetrace ./chart \
-  -f ./values/production.yaml \
-  --output json > valuetrace-report.json
-```
-
-![Terminal output showing ValueTrace JSON with final values, winning sources, and assignment histories](screenshots/json-output.png)
-
-Structured output has four top-level collections:
-
-```json
-{
-  "values": [
-    {
-      "key": "image.tag",
-      "value": "v2.0.0",
-      "source": "--set[1]",
-      "assignments": [
-        {"source": "chart/values.yaml:5", "value": "stable"},
-        {"source": "values-production.yaml:4", "value": "v1.9.0"},
-        {"source": "--set[1]", "value": "v2.0.0"}
-      ]
-    }
-  ],
-  "unknown": [],
-  "missing": [],
-  "denied_sources": []
-}
-```
-
-`values` contains final values, winning sources, and ordered assignment history. `unknown` contains unexpected keys plus an optional suggestion. `missing` contains reference keys absent from the analyzed result. `denied_sources` contains values files rejected by `--deny-source` and the pattern each one matched.
-
-Warnings go to standard error; structured reports go to standard output.
-
-## CI/CD integration
-
-ValueTrace complements Helm's own checks:
-
-```bash
-helm lint ./chart -f ./values/production.yaml
-helm valuetrace ./chart -f ./values/production.yaml \
-  --strict-unknown --deny-source '*debug*'
-helm template api ./chart -f ./values/production.yaml > rendered.yaml
-```
-
-| Command | Question answered |
-| --- | --- |
-| `helm lint` | Is the chart structurally valid according to Helm and its schema? |
-| `helm valuetrace` | Which supported source produced each final value, and are keys expected? |
-| `helm template` | Which Kubernetes manifests will Helm render? |
-| `helm diff` | What would change compared with an existing release? |
-
-ValueTrace does not replace linting, schema validation, rendering, diff, or dry-run workflows.
-
-## Command reference
-
-| Option | Behavior |
-| --- | --- |
-| `-f FILE`, `--values FILE` | Merge an override YAML file; repeatable. |
-| `--set KEY=VALUE` | Apply dotted key overrides after values files; repeatable. |
-| `--reference-values FILE` | Supply an allowed-key structure without merging its values. |
-| `--strict-unknown` | Exit `2` when an override or `--set` contains an unknown key. |
-| `--strict-reference` | Exit `2` when reference comparison finds unknown or missing keys. |
-| `--deny-source PATTERN` | Exit `2` when a supplied `-f` file matches a filename or glob; repeatable. |
-| `-o FORMAT`, `--output FORMAT` | `table`, `json`, or `yaml`; default `table`. |
-| `--only-overridden` | Show only keys assigned at least twice. |
-| `-h`, `--help` | Show help. |
-| `--version` | Show installed version. |
-
-```bash
-helm valuetrace --help
-```
-
-## Exit codes
+ValueTrace returns deterministic exit codes for CI/CD automation:
 
 | Code | Meaning |
 | ---: | --- |
-| `0` | Analysis completed; no enabled strict validation failed. |
-| `1` | Input/usage error: for example missing chart/file, invalid YAML, or invalid `--set`. |
-| `2` | A validation check found structural issues or a source policy blocked a values file. |
+| `0` | Success: analysis completed; all enabled validations passed |
+| `1` | Usage / input error: invalid arguments, missing file, syntax error |
+| `2` | Validation / policy violation: unknown keys, schema failure, denied source |
+| `3` | Chart / dependency error: missing `Chart.yaml`, corrupt archive |
+| `4` | Internal error: unexpected runtime exception |
 
-For non-zero plugin exits, Helm may also print:
+---
 
-```text
-Error: plugin "valuetrace" exited with error
-```
+## Scope & Limitations
 
-In strict mode, that message can be the expected result of a blocked validation step.
+- **Local charts only:** Analyzes local chart directories and `.tgz` archives; does not fetch from remote HTTP or OCI registries.
+- **Client-side only:** Runs entirely locally without connecting to a Kubernetes cluster or reading a `kubeconfig`.
+- **Static template analysis:** `--template-analysis` statically scans `.Values.*` references; it does not evaluate dynamic template logic (`tpl`, `range`, `include`).
+- **Experimental subcharts:** `--experimental-subcharts` discovers local subcharts in `charts/`; dynamic repository downloads and complex coalescing permutations are outside the verified boundary.
 
-## Safety and privacy
+![Helm ValueTrace subchart provenance](screenshots/v0.2.0-subcharts-architecture.png)
 
-ValueTrace is local and read-only:
+![Helm ValueTrace template analysis](screenshots/v0.2.0-terminal-template-analysis.png)
 
-- It does not connect to the Kubernetes API or require `kubeconfig`.
-- It does not install or upgrade releases.
-- It does not modify charts or values files.
-- It does not upload chart data externally.
-- It does not write a report file unless output is redirected.
-
-However, reports print final values. Passwords, tokens, registry credentials, private domains, or other sensitive data can therefore appear in terminal output, JSON/YAML reports, screenshots, or CI/CD logs.
-
-**Do not publish reports containing secrets or proprietary configuration.**
-
-## Scope and limitations
-
-ValueTrace `v0.1.0` intentionally focuses on local Helm values tracing rather than reproducing all Helm behavior.
-
-**Supported**
-
-- Local unpacked chart directories
-- Helm-style YAML map layering and default coalescing
-- Nested mapping merges across repeated values files
-- Later scalar/list replacement
-- Dotted and comma-separated `--set` assignments
-- Structural unknown-key validation and reference comparison
-- Repeatable filename and glob policies for denied `-f` sources
-- Helm-compatible scalar typing for supported `--set` values
-- Version-aware Helm 3/4 YAML `null` behavior
-- Extensible empty mappings
-
-**Not supported in v0.1.0**
-
-- Remote chart references or OCI chart URLs
-- Packaged `.tgz` charts
-- Template rendering or inspection of `.Values` paths used by templates
-- `values.schema.json` validation
-- Chart dependency loading
-- Full subchart coalescing behavior
-- Array-index expressions such as `servers[0].port`
-- Escaped dots in `--set` key names
-- Helm brace-list syntax such as `--set names={api,worker}`
-- `--set-string`, `--set-file`, `--set-json`, or `--set-literal`
-- Separate history for duplicate keys inside one YAML document
-
-Unknown-key checks are structural, not template-aware. Reference comparison checks structure, not application business requirements.
-
-For deployment truth, combine ValueTrace with Helm linting, schema validation, rendering, diff, and dry-run workflows.
+---
 
 ## Troubleshooting
 
-### Chart path errors
+### Python version is too old
 
-The chart directory must exist and contain `Chart.yaml`:
+ValueTrace requires Python 3.10+. If `python3 --version` is 3.9 or older, install Python 3.10+ or run ValueTrace in a supported virtual environment.
 
-```bash
-find . -name Chart.yaml -printf '%h\n' | sort
-helm valuetrace ./returned/chart/path
-```
+### Plugin installed but command is unavailable
 
-### Values file not found
-
-Pass a YAML file to `-f`, not a directory:
+Ensure the plugin directory is detected by Helm:
 
 ```bash
-find . -type f \( -name 'values*.yaml' -o -name 'values*.yml' \) | sort
+helm plugin list
+helm valuetrace --version
 ```
 
-### Every key is unknown
+If missing, reinstall using `./install-local.sh`.
 
-If the chart has no `values.yaml`, provide a reference:
+### Chart directory error
 
-```bash
-helm valuetrace ./chart \
-  --reference-values ./values/reference.yaml \
-  -f ./values/staging.yaml
-```
+ValueTrace requires a local chart directory or packaged archive containing `Chart.yaml`. Verify that the specified path points directly to the chart root.
 
-### Strict mode prints a plugin error
-
-Strict validation returns exit code `2`; Helm then prints its standard plugin failure message. This is expected when CI is intentionally blocked.
-
-### Plugin breaks after deleting the source directory
-
-If it was installed with development-mode behavior using `helm plugin install .`, reinstall from the repository with:
-
-```bash
-./install-local.sh
-```
-
-The included installer creates an independent permanent plugin copy.
-
-## Compatibility
-
-ValueTrace `v0.1.0` has been tested with:
-
-- Helm 3.21.4 and Helm 4.2.4 through automated differential tests
-- Python 3.10, 3.11, 3.12, and 3.13
-- Linux plugin paths reported by `helm env HELM_PLUGINS`
-
-Installation uses POSIX shell scripts; analysis uses Python 3.
+---
 
 ## Development
 
-ValueTrace was developed with AI-assisted tooling to accelerate implementation, testing, and documentation. Behavior was then validated through automated tests, failure scenarios, real plugin installations, Helm 3/4 differential tests, strict-mode exit-code checks, multi-environment inputs, unknown-key cases, precedence mistakes, null coalescing, scalar typing, and structured-output validation.
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev]'
+pytest
+ruff check .
+ruff format --check .
+```
 
-AI accelerated the implementation; the problem definition, supported behavior, limitations, and validation criteria remained explicit engineering decisions.
+---
 
 ## Contributing
 
-Issues and pull requests are welcome. Bug reports should include:
+Issues and pull requests are welcome on [GitHub](https://github.com/aboodcs/helm-valuetrace). Please ensure changes include tests and pass `ruff check .`.
 
-- Helm, Python, and ValueTrace versions
-- Command used
-- Minimal non-sensitive chart/values structure
-- Actual and expected behavior
-
-Do not include production secrets or proprietary configuration.
+---
 
 ## License
 
 Distributed under the [MIT License](LICENSE).
-
-## Author
-
-Abdulrehman Abulaban — [GitHub](https://github.com/aboodcs)
-
-Current release: **v0.1.0**. See [CHANGELOG.md](CHANGELOG.md) for release history.

@@ -4,7 +4,6 @@ import sys
 import unittest
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
@@ -219,6 +218,48 @@ class TraceValuesTests(unittest.TestCase):
         self.assertEqual([item.key for item in result.unknown], ["autoscaling.enabled"])
         self.assertEqual([item.key for item in result.missing], ["image.repository"])
         self.assertEqual(result.missing[0].reference, "values-production.yaml")
+
+    def test_set_json_container_flattens_into_leaf_keys_and_overrides_provenance(self) -> None:
+        from helm_valuetrace.core import final_assignment
+        from helm_valuetrace.parsers.set_parser import parse_all_set_arguments
+
+        result = trace_values(
+            default_values={"image": {"repository": "nginx", "tag": "1.0"}},
+            default_source="values.yaml",
+            default_lines={("image", "repository"): 1, ("image", "tag"): 2},
+            overrides=[],
+            extra_set_entries=parse_all_set_arguments(set_json_args=['image={"tag": "3.0"}']),
+        )
+
+        self.assertEqual(result.values["image"]["tag"], "3.0")
+        self.assertEqual(result.values["image"]["repository"], "nginx")
+
+        tag_history = result.history[("image", "tag")]
+        self.assertEqual(len(tag_history), 2)
+        self.assertEqual(tag_history[0].source, "values.yaml")
+        self.assertEqual(tag_history[1].source, "--set-json[1]")
+        self.assertEqual(tag_history[1].value, "3.0")
+
+        winner = final_assignment(("image", "tag"), result.history)
+        self.assertIsNotNone(winner)
+        self.assertEqual(winner.source, "--set-json[1]")
+        self.assertEqual(winner.value, "3.0")
+
+    def test_final_assignment_child_precedence_on_container(self) -> None:
+        from helm_valuetrace.core import final_assignment
+        from helm_valuetrace.parsers.set_parser import parse_all_set_arguments
+
+        result = trace_values(
+            default_values={"image": {"repository": "nginx", "tag": "1.0"}},
+            default_source="values.yaml",
+            default_lines={("image", "repository"): 1, ("image", "tag"): 2},
+            overrides=[],
+            extra_set_entries=parse_all_set_arguments(set_args=["image.tag=2.0"]),
+        )
+
+        container_winner = final_assignment(("image",), result.history)
+        self.assertIsNotNone(container_winner)
+        self.assertEqual(container_winner.source, "--set[1]")
 
 
 if __name__ == "__main__":

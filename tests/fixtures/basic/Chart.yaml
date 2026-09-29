@@ -1,0 +1,5 @@
+apiVersion: v2
+name: basic
+description: A basic Helm chart fixture for testing
+version: 0.1.0
+appVersion: "1.16.0"

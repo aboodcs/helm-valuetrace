@@ -1,0 +1,11 @@
+include plugin.yaml
+include requirements.txt
+include LICENSE
+include README.md
+recursive-include scripts *
+recursive-include bin *
+recursive-include src/helm_valuetrace *.py
+
+include install-local.sh uninstall-local.sh CHANGELOG.md
+recursive-include examples *.md *.yaml *.json
+recursive-include docs *.md

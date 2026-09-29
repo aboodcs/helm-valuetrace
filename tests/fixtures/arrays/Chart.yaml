@@ -1,0 +1,4 @@
+apiVersion: v2
+name: arrays
+description: An array-heavy Helm chart fixture
+version: 0.1.0
